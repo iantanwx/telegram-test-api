@@ -7,7 +7,10 @@ import express from 'express';
 import http from 'http';
 import shutdown from 'http-shutdown';
 import type {
-  InlineKeyboardMarkup, Message, MessageEntity, Params,
+  InlineKeyboardMarkup,
+  Message,
+  MessageEntity,
+  Params,
 } from 'typegram';
 import { requestLogger } from './modules/requestLogger';
 import { sendResult } from './modules/sendResult';
@@ -17,9 +20,7 @@ import type {
   CommandRequest,
   MessageRequest,
 } from './modules/telegramClient';
-import {
-  TelegramClient,
-} from './modules/telegramClient';
+import { TelegramClient } from './modules/telegramClient';
 import { routes } from './routes/index';
 
 const debugServer = debugTest('TelegramServer:server');
@@ -27,6 +28,7 @@ const debugStorage = debugTest('TelegramServer:storage');
 
 interface WebHook {
   url: string;
+  secret_token?: string;
 }
 type Server = ReturnType<typeof shutdown>;
 
@@ -41,12 +43,15 @@ interface StoredUpdate {
 type BotIncommingMessage = Params<'sendMessage', never>[0];
 
 type BotEditTextIncommingMessage = Params<'editMessageText', never>[0];
-type BotEditReplyMarkupIncommingMessage = Params<'editMessageReplyMarkup', never>[0];
+type BotEditReplyMarkupIncommingMessage = Params<
+  'editMessageReplyMarkup',
+  never
+>[0];
 
 type RawIncommingMessage = {
   reply_markup?: string | object;
-  entities?:string | object
-}
+  entities?: string | object;
+};
 
 export interface StoredBotUpdate extends StoredUpdate {
   message: BotIncommingMessage;
@@ -142,7 +147,12 @@ export class TelegramServer extends EventEmitter {
      * Catch uncought errors e.g. express bodyParser error
      * @see https://expressjs.com/en/guide/error-handling.html#the-default-error-handler
      */
-    const globalErrorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
+    const globalErrorHandler: ErrorRequestHandler = (
+      error,
+      _req,
+      res,
+      _next
+    ) => {
       debugServer(`Error: ${error}`);
       res.sendError(new Error(`Something went wrong. ${error}`));
     };
@@ -207,13 +217,12 @@ export class TelegramServer extends EventEmitter {
   editMessageText(rawMessage: BotEditTextIncommingMessage) {
     const message = TelegramServer.normalizeMessage(rawMessage);
     const update = this.storage.botMessages.find(
-      (u) =>(
-        String(u.messageId) === String(message.message_id)
-        && String(u.message.chat_id) === String(message.chat_id)
-      ),
+      (u) =>
+        String(u.messageId) === String(message.message_id) &&
+        String(u.message.chat_id) === String(message.chat_id)
     );
     if (update) {
-      update.message = {...update.message, ...message };
+      update.message = { ...update.message, ...message };
       this.emit('EditedMessageText');
     }
   }
@@ -223,13 +232,12 @@ export class TelegramServer extends EventEmitter {
     // only InlineKeyboardMarkup is allowed in response
     if (message.reply_markup && 'inline_keyboard' in message.reply_markup) {
       const update = this.storage.botMessages.find(
-        (u) =>(
-          String(u.messageId) === String(message.message_id)
-          && String(u.message.chat_id) === String(message.chat_id)
-        ),
+        (u) =>
+          String(u.messageId) === String(message.message_id) &&
+          String(u.message.chat_id) === String(message.chat_id)
       );
       if (update) {
-        update.message = {...update.message, ...message };
+        update.message = { ...update.message, ...message };
         this.emit('EditedMessageReplyMarkup');
       }
     }
@@ -307,14 +315,19 @@ export class TelegramServer extends EventEmitter {
   private async addUserUpdate(update: StoredClientUpdate) {
     assert.ok(
       update.botToken,
-      'The message must be of type object and must contain `botToken` field.',
+      'The message must be of type object and must contain `botToken` field.'
     );
     const webhook = this.webhooks[update.botToken];
     if (webhook) {
+      const headers: Record<string, string> = {};
+      if (webhook.secret_token) {
+        headers['X-Telegram-Bot-Api-Secret-Token'] = webhook.secret_token;
+      }
       const resp = await request({
         url: webhook.url,
         method: 'POST',
         data: TelegramServer.formatUpdate(update),
+        headers,
       });
       if (resp.status > 204) {
         debugServer(
@@ -324,7 +337,7 @@ export class TelegramServer extends EventEmitter {
             requestBody: update,
             responseStatus: resp.status,
             responseBody: resp.data,
-          })}`,
+          })}`
         );
         throw new Error('Webhook invocation failed');
       }
@@ -343,24 +356,24 @@ export class TelegramServer extends EventEmitter {
   cleanUp() {
     debugStorage('clearing storage');
     debugStorage(
-      `current userMessages storage: ${this.storage.userMessages.length}`,
+      `current userMessages storage: ${this.storage.userMessages.length}`
     );
     this.storage.userMessages = this.storage.userMessages.filter(
       this.messageFilter,
-      this,
+      this
     );
     debugStorage(
-      `filtered userMessages storage: ${this.storage.userMessages.length}`,
+      `filtered userMessages storage: ${this.storage.userMessages.length}`
     );
     debugStorage(
-      `current botMessages storage: ${this.storage.botMessages.length}`,
+      `current botMessages storage: ${this.storage.botMessages.length}`
     );
     this.storage.botMessages = this.storage.botMessages.filter(
       this.messageFilter,
-      this,
+      this
     );
     debugStorage(
-      `filtered botMessages storage: ${this.storage.botMessages.length}`,
+      `filtered botMessages storage: ${this.storage.botMessages.length}`
     );
   }
 
@@ -370,7 +383,7 @@ export class TelegramServer extends EventEmitter {
     }
     this.cleanUpDaemonInterval = setInterval(
       this.cleanUp.bind(this),
-      this.config.storeTimeout,
+      this.config.storeTimeout
     );
   }
 
@@ -387,7 +400,7 @@ export class TelegramServer extends EventEmitter {
 
   getUpdates(token: string) {
     const messages = this.storage.userMessages.filter(
-      (update) => update.botToken === token && !update.isRead,
+      (update) => update.botToken === token && !update.isRead
     );
     // turn messages into updates
     return messages.map((update) => {
@@ -406,7 +419,7 @@ export class TelegramServer extends EventEmitter {
         .once('error', reject);
     });
     debugServer(
-      `Telegram API server is up on port ${this.config.port} in ${this.webServer.settings.env} mode`,
+      `Telegram API server is up on port ${this.config.port} in ${this.webServer.settings.env} mode`
     );
     this.started = true;
     this.cleanUpDaemon();
@@ -414,13 +427,13 @@ export class TelegramServer extends EventEmitter {
 
   removeUserMessage(updateId: number) {
     this.storage.userMessages = this.storage.userMessages.filter(
-      (update) => update.updateId !== updateId,
+      (update) => update.updateId !== updateId
     );
   }
 
   removeBotMessage(updateId: number) {
     this.storage.botMessages = this.storage.botMessages.filter(
-      (update) => update.updateId !== updateId,
+      (update) => update.updateId !== updateId
     );
   }
 
@@ -440,7 +453,7 @@ export class TelegramServer extends EventEmitter {
    */
   deleteMessage(chatId: number, messageId: number) {
     const isMessageToDelete = (
-      update: StoredClientUpdate | StoredBotUpdate,
+      update: StoredClientUpdate | StoredBotUpdate
     ) => {
       let messageChatId: number;
       if ('callbackQuery' in update) {
@@ -525,16 +538,20 @@ export class TelegramServer extends EventEmitter {
    * @param message incomming message that can have JSON-serialized strings
    * @returns the same message but with reply_markdown & entities parsed
    */
-  private static normalizeMessage <T extends RawIncommingMessage>(message: T) {
+  private static normalizeMessage<T extends RawIncommingMessage>(message: T) {
     if ('reply_markup' in message) {
       // eslint-disable-next-line no-param-reassign
-      message.reply_markup = typeof message.reply_markup === 'string'
-        ? JSON.parse(message.reply_markup) : message.reply_markup;
+      message.reply_markup =
+        typeof message.reply_markup === 'string'
+          ? JSON.parse(message.reply_markup)
+          : message.reply_markup;
     }
     if ('entities' in message) {
       // eslint-disable-next-line no-param-reassign
-      message.entities = typeof message.entities === 'string'
-        ? JSON.parse(message.entities) : message.entities;
+      message.entities =
+        typeof message.entities === 'string'
+          ? JSON.parse(message.entities)
+          : message.entities;
     }
     return message;
   }
